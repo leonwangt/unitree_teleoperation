@@ -16,6 +16,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <memory>
+#include <functional>
 
 // For mujoco render
 #include <mujoco/mujoco.h>
@@ -25,13 +27,11 @@
 // #include "unitree_h1_lcm.hpp"
 
 
-#include <array>
-#include <chrono>
-#include <iostream>
-#include <thread>
 
+//----for high_level commond-----//
 #include <unitree/idl/go2/LowCmd_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
+
 
 static const std::string kTopicArmSDK = "rt/arm_sdk";
 constexpr float kPi = 3.141592654;
@@ -51,10 +51,13 @@ bool s_isRunning = true;
 
 #define Control_G1 false
 #define Control_H1 true
-#define Real_Control false    // control real unitree robot in reality
+#define Real_Control true    // control real unitree robot in reality
 #define Enable_Torso false    // enable torso rotation angle mapping. Test function, open with caution!
 #define Enable_Hand  false    // enable hand opening and closing status detection. Test function, open with caution!
 #define EchoFrequency false   // Whether to display the running frequency of each thread
+
+#define NETWORK_INTERFACE "enp3s0"  // define wangtao network interface
+
 
 #if Real_Control
 // SDK include files for unitree robot real control
@@ -77,6 +80,36 @@ struct hardware_control_signal {
     double right_shoulder_yaw = 0.0;
     double left_elbow_yaw = 0.0;
     double right_elbow_yaw = 0.0;
+};
+
+enum JointIndex {
+  // Right leg
+  kRightHipYaw = 8,
+  kRightHipRoll = 0,
+  kRightHipPitch = 1,
+  kRightKnee = 2,
+  kRightAnkle = 11,
+
+  // Left leg
+  kLeftHipYaw = 7,
+  kLeftHipRoll = 3,
+  kLeftHipPitch = 4,
+  kLeftKnee = 5,
+  kLeftAnkle = 10,
+  kWaistYaw = 6,
+  kNotUsedJoint = 9,
+
+  // Right arm
+  kRightShoulderPitch = 12,
+  kRightShoulderRoll = 13,
+  kRightShoulderYaw = 14,
+  kRightElbow = 15,
+
+  // Left arm
+  kLeftShoulderPitch = 16,
+  kLeftShoulderRoll = 17,
+  kLeftShoulderYaw = 18,
+  kLeftElbow = 19,
 };
 
 // For control real robot G1
@@ -413,8 +446,9 @@ void MujocoRender_loop() {
 #endif
 
 /*****************************************************Control Smooth and Transfer*****************************************************************/
-
-void Control_loop() {
+void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::msg::dds_::LowCmd_>> arm_sdk_publisher,
+    unitree_go::msg::dds_::LowCmd_ &msg) {
+// void Control_loop() {
     std::cout<<"control loop start..."<<std::endl;
     int left_shoulder_roll_joint_id = mj_name2id(m, mjOBJ_ACTUATOR, "left_shoulder_roll_joint");
     int left_shoulder_pitch_joint_id = mj_name2id(m, mjOBJ_ACTUATOR, "left_shoulder_pitch_joint");
@@ -537,6 +571,42 @@ void Control_loop() {
             G1_hardware_signal.right_elbow_yaw = right_elbow_yaw;
             #endif
             #endif
+
+    std::array<JointIndex, 9> arm_joints = {
+    JointIndex::kLeftShoulderPitch,  JointIndex::kLeftShoulderRoll,
+    JointIndex::kLeftShoulderYaw,    JointIndex::kLeftElbow,
+    JointIndex::kRightShoulderPitch, JointIndex::kRightShoulderRoll,
+    JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw};
+
+    float weight = 0.f;
+    float weight_rate = 0.2f;
+
+    float kp = 60.f;
+    float kd = 1.5f;
+    float dq = 0.f;
+    float tau_ff = 0.f;
+
+    float control_dt = 0.02f;
+    float max_joint_velocity = 0.5f;
+
+    float delta_weight = weight_rate * control_dt;
+    float max_joint_delta = max_joint_velocity * control_dt;
+
+  std::array<float, 9> target_pos = {0.f, kPi_2,  0.f, kPi_2,
+                                     0.f, -kPi_2, 0.f, kPi_2,
+                                     0.f};            
+
+    for (int j = 0; j < target_pos.size(); ++j) {
+      msg.motor_cmd().at(arm_joints.at(j)).q(target_pos.at(j));
+      msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+      msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+      msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+      msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+    }
+
+    // send dds msg
+    // arm_sdk_publisher->Write(msg);
+
 
             #if EchoFrequency
             time_point<high_resolution_clock> ctrl_end = high_resolution_clock::now();
@@ -741,13 +811,29 @@ int main(int argc, char** argv)
     const char* model_path = "../src/unitree_h1/mjcf/scene.xml"; 
     #endif
 
+    unitree::robot::ChannelFactory::Instance()->Init(0, argv[1]);
+    // const char* network_interface = NETWORK_INTERFACE;
+    // unitree::robot::ChannelFactory::Instance()->Init(0, network_interface);
 
+    
+
+    unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>
+        arm_sdk_publisher;
+    unitree_go::msg::dds_::LowCmd_ msg;
+
+    arm_sdk_publisher.reset(
+        new unitree::robot::ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(
+            kTopicArmSDK));
+    arm_sdk_publisher->InitChannel();
+
+    
     char error[1000];
     m = mj_loadXML(model_path, nullptr, error, 1000);
     d = mj_makeData(m);
     mj_resetData(m, d);
 
-    std::thread control_thread(Control_loop);
+    // std::thread control_thread(Control_loop);
+    std::thread control_thread(std::bind(Control_loop, arm_sdk_publisher, std::ref(msg)));
     std::thread mujocoRender_thread(MujocoRender_loop);
 
     Main_loop();
