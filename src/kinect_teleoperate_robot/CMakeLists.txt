@@ -13,7 +13,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
 add_compile_options(-std=c++17)
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
 
 # Eigen
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -110,6 +110,10 @@ target_include_directories(unitree_sdk2 INTERFACE
 
 add_executable(kinect_teleoperate main.cpp)
 
+set_target_properties(kinect_teleoperate PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_include_directories(kinect_teleoperate 
     PRIVATE 
     ../sample_helper_includes 
@@ -130,3 +134,4 @@ target_link_libraries(kinect_teleoperate PRIVATE
     lcm
     unitree_sdk2
 )
+

@@ -32,7 +32,6 @@
 #include <unitree/idl/go2/LowCmd_.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
 
-
 static const std::string kTopicArmSDK = "rt/arm_sdk";
 constexpr float kPi = 3.141592654;
 constexpr float kPi_2 = 1.57079632;
@@ -54,9 +53,10 @@ bool s_isRunning = true;
 #define Real_Control true    // control real unitree robot in reality
 #define Enable_Torso false    // enable torso rotation angle mapping. Test function, open with caution!
 #define Enable_Hand  false    // enable hand opening and closing status detection. Test function, open with caution!
-#define EchoFrequency false   // Whether to display the running frequency of each thread
+#define EchoFrequency true   // Whether to display the running frequency of each thread
 
-#define NETWORK_INTERFACE "enp3s0"  // define wangtao network interface
+// #define NETWORK_INTERFACE "enp3s0"  // define wangtao network interface
+const std::string NETWORK_INTERFACE = "enp3s0";  // define wangtao network interface
 
 
 #if Real_Control
@@ -72,14 +72,14 @@ bool s_isRunning = true;
 static float sc_r, sc_p, sc_y, ls_r, ls_p, ls_y, le_r, le_p, le_y, rs_r, rs_p, rs_y, re_r, re_p, re_y, lh_a, rh_a;
 
 struct hardware_control_signal {
-    double left_shoulder_roll = 0.0;
-    double left_shoulder_pitch = 0.0;
-    double left_shoulder_yaw = 0.0;
-    double right_shoulder_roll = 0.0;
-    double right_shoulder_pitch = 0.0;
-    double right_shoulder_yaw = 0.0;
-    double left_elbow_yaw = 0.0;
-    double right_elbow_yaw = 0.0;
+    float left_shoulder_roll = 0.0;
+    float left_shoulder_pitch = 0.0;
+    float left_shoulder_yaw = 0.0;
+    float right_shoulder_roll = 0.0;
+    float right_shoulder_pitch = 0.0;
+    float right_shoulder_yaw = 0.0;
+    float left_elbow_yaw = 0.0;
+    float right_elbow_yaw = 0.0;
 };
 
 enum JointIndex {
@@ -96,6 +96,7 @@ enum JointIndex {
   kLeftHipPitch = 4,
   kLeftKnee = 5,
   kLeftAnkle = 10,
+
   kWaistYaw = 6,
   kNotUsedJoint = 9,
 
@@ -109,8 +110,21 @@ enum JointIndex {
   kLeftShoulderPitch = 16,
   kLeftShoulderRoll = 17,
   kLeftShoulderYaw = 18,
-  kLeftElbow = 19,
+  kLeftElbow = 19
 };
+
+std::array<float, 8> init_pos{};
+std::array<float, 8> current_jpos_des{};
+std::array<float, 8> target_pos = { 0.f,  kPi_2,  0.f, kPi_2,
+                                0.f, -kPi_2,  0.f, kPi_2 };
+
+
+void printArray(const std::array<float, 9>& arr) {
+    for (const auto& val : arr) {
+        std::cout << val << " ";
+    }
+    std::cout << std::endl;  
+}
 
 // For control real robot G1
 #if Control_G1
@@ -475,22 +489,7 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
 
     StartEndPoseDetector pose_detector;
 
-    // lcm::LCM lcm;
-    // exlcm::example_t msg;
-    // msg.timestamp = 0;
-    // msg.position[0] = 1.0;
-    // msg.position[1] = 2.0;
-    // msg.position[2] = 3.0;
-    // msg.orientation[0] = 1.0;
-    // msg.orientation[1] = 0.0;
-    // msg.orientation[2] = 0.0;
-    // msg.orientation[3] = 0.0;
-    // msg.num_ranges = 5;
-    // msg.ranges.resize(msg.num_ranges);
-    // for (int i = 0; i < msg.num_ranges; i++) {
-    //     msg.ranges[i] = i;
-    // }
- 
+
 
     time_point<high_resolution_clock> ctrl_start;
     while (s_isRunning) {
@@ -552,14 +551,14 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
 
             #if Real_Control
             #if Control_H1
-            H1_hardware_signal.left_shoulder_pitch = left_shoulder_yaw;
-            H1_hardware_signal.left_shoulder_roll = left_shoulder_roll;
-            H1_hardware_signal.left_shoulder_yaw = left_shoulder_pitch;
-            H1_hardware_signal.right_shoulder_pitch = right_shoulder_yaw;
-            H1_hardware_signal.right_shoulder_roll = right_shoulder_pitch;
-            H1_hardware_signal.right_shoulder_yaw = right_shoulder_roll;
-            H1_hardware_signal.left_elbow_yaw = left_elbow_yaw;
-            H1_hardware_signal.right_elbow_yaw = right_elbow_yaw;
+            H1_hardware_signal.left_shoulder_pitch = static_cast<float>(left_shoulder_yaw);
+            H1_hardware_signal.left_shoulder_roll = static_cast<float>(left_shoulder_roll);
+            H1_hardware_signal.left_shoulder_yaw = static_cast<float>(left_shoulder_pitch);
+            H1_hardware_signal.right_shoulder_pitch = static_cast<float>(right_shoulder_yaw);
+            H1_hardware_signal.right_shoulder_roll = static_cast<float>(right_shoulder_pitch);
+            H1_hardware_signal.right_shoulder_yaw = static_cast<float>(right_shoulder_roll);
+            H1_hardware_signal.left_elbow_yaw = static_cast<float>(left_elbow_yaw);
+            H1_hardware_signal.right_elbow_yaw = static_cast<float>(right_elbow_yaw);
             #elif Control_G1
             G1_hardware_signal.left_shoulder_pitch = left_shoulder_yaw;
             G1_hardware_signal.left_shoulder_roll = left_shoulder_roll;
@@ -572,41 +571,117 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
             #endif
             #endif
 
-    std::array<JointIndex, 9> arm_joints = {
-    JointIndex::kLeftShoulderPitch,  JointIndex::kLeftShoulderRoll,
-    JointIndex::kLeftShoulderYaw,    JointIndex::kLeftElbow,
-    JointIndex::kRightShoulderPitch, JointIndex::kRightShoulderRoll,
-    JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw};
+            std::array<JointIndex, 9> arm_joints = {
+            JointIndex::kLeftShoulderPitch,  JointIndex::kLeftShoulderRoll,
+            JointIndex::kLeftShoulderYaw,    JointIndex::kLeftElbow,
+            JointIndex::kRightShoulderPitch, JointIndex::kRightShoulderRoll,
+            JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw};
 
-    float weight = 0.f;
-    float weight_rate = 0.2f;
+            float weight = 0.f;
+            float weight_rate = 0.2f;
 
-    float kp = 60.f;
-    float kd = 1.5f;
-    float dq = 0.f;
-    float tau_ff = 0.f;
+            float kp = 60.f;
+            float kd = 1.5f;
+            float dq = 0.f;
+            float tau_ff = 0.f;
 
-    float control_dt = 0.02f;
-    float max_joint_velocity = 0.5f;
+            float control_dt = 0.02f;
+            float max_joint_velocity = 0.5f;
 
-    float delta_weight = weight_rate * control_dt;
-    float max_joint_delta = max_joint_velocity * control_dt;
+            float delta_weight = weight_rate * control_dt;
+            float max_joint_delta = max_joint_velocity * control_dt;
+            auto sleep_time =
+            std::chrono::milliseconds(static_cast<int>(control_dt / 0.001f));
 
-  std::array<float, 9> target_pos = {0.f, kPi_2,  0.f, kPi_2,
-                                     0.f, -kPi_2, 0.f, kPi_2,
-                                     0.f};            
 
-    for (int j = 0; j < target_pos.size(); ++j) {
-      msg.motor_cmd().at(arm_joints.at(j)).q(target_pos.at(j));
-      msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
-      msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
-      msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
-      msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
-    }
 
-    // send dds msg
-    // arm_sdk_publisher->Write(msg);
+            // Target Pos Set and  envalue;
+            // std::array<float, 9> target_pos = {
+            //                 H1_hardware_signal.left_shoulder_pitch,
+            //                 H1_hardware_signal.left_shoulder_roll,
+            //                 H1_hardware_signal.left_shoulder_yaw,
+            //                 H1_hardware_signal.left_elbow_yaw,
+            //                 H1_hardware_signal.right_shoulder_pitch,
+            //                 H1_hardware_signal.right_shoulder_roll,
+            //                 H1_hardware_signal.right_shoulder_yaw,
+            //                 H1_hardware_signal.right_elbow_yaw , 0.f};  
 
+            // target_pos = {
+            //     H1_hardware_signal.left_shoulder_pitch,
+            //     H1_hardware_signal.left_shoulder_roll,
+            //     H1_hardware_signal.left_shoulder_yaw,
+            //     H1_hardware_signal.left_elbow_yaw,
+            //     H1_hardware_signal.right_shoulder_pitch,
+            //     H1_hardware_signal.right_shoulder_roll,
+            //     H1_hardware_signal.right_shoulder_yaw,
+            //     H1_hardware_signal.right_elbow_yaw , 0.f};  
+
+
+
+            // increase weight
+            weight += delta_weight;
+            weight = std::clamp(weight, 0.f, 1.f);
+            std::cout << weight << std::endl;
+
+            // set weight
+            msg.motor_cmd().at(JointIndex::kNotUsedJoint).q(weight * weight);
+
+            // update jpos des
+              // for (int j = 0; j < target_pos.size(); ++j) {
+            // current_jpos_des.at(j) +=
+                // std::clamp(target_pos.at(j) - current_jpos_des.at(j),
+            //                 -max_joint_delta, max_joint_delta);
+                
+
+            // }
+            // std::cout << "***********current pos*********" << std::endl;
+            // std::cout << current_jpos_des.at(1) << std::endl;
+            // std::cout << "***********target_pos pos*********" << std::endl;
+            // std::cout << target_pos.at(1) << std::endl;        
+
+            // for (int j = 0; j < target_pos.size(); ++j) {
+            //     float delta = target_pos.at(j) - current_jpos_des.at(j);
+            //     delta = std::clamp(delta, -max_joint_delta, max_joint_delta);
+            //     current_jpos_des.at(j) += delta;
+            // }        
+            
+            //     std::cout << "Joint 2: " <<  std::endl;
+            //     std::cout << "Current Pos: " << current_jpos_des.at(1)
+            //             << " Target Pos: " << target_pos.at(1) << std::endl;      
+
+            // // set control joints
+            // for (int j = 0; j < init_pos.size(); ++j) {
+            // msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+            // msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+            // msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+            // msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+            // msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+            // }
+
+
+
+            // lift arms up
+            // update jpos des
+            for (int j = 0; j < init_pos.size(); ++j) {
+            current_jpos_des.at(j) +=
+                std::clamp(target_pos.at(j) - current_jpos_des.at(j),
+                            -max_joint_delta, max_joint_delta);
+
+            // set control joints
+            for (int j = 0; j < init_pos.size(); ++j) {
+                msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+                msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+                msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+                msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+                msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+            }
+
+
+        }
+
+            // send dds msg
+            arm_sdk_publisher->Write(msg);
+            // std::this_thread::sleep_for(sleep_time);
 
             #if EchoFrequency
             time_point<high_resolution_clock> ctrl_end = high_resolution_clock::now();
@@ -801,7 +876,9 @@ void Main_loop(){
 }
 
 
-int main(int argc, char** argv)
+
+
+int main(int argc, char const *argv[])
 {
 
     #if Control_G1
@@ -811,12 +888,12 @@ int main(int argc, char** argv)
     const char* model_path = "../src/unitree_h1/mjcf/scene.xml"; 
     #endif
 
+    if (argc < 2) {
+    std::cout << "Usage: " << argv[0] << " networkInterface" << std::endl;
+    exit(-1);
+    }
+
     unitree::robot::ChannelFactory::Instance()->Init(0, argv[1]);
-    // const char* network_interface = NETWORK_INTERFACE;
-    // unitree::robot::ChannelFactory::Instance()->Init(0, network_interface);
-
-    
-
     unitree::robot::ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_>
         arm_sdk_publisher;
     unitree_go::msg::dds_::LowCmd_ msg;
@@ -826,13 +903,15 @@ int main(int argc, char** argv)
             kTopicArmSDK));
     arm_sdk_publisher->InitChannel();
 
+    /*--------------------------------*/
     
+    /*--------------------------------*/  
     char error[1000];
     m = mj_loadXML(model_path, nullptr, error, 1000);
     d = mj_makeData(m);
     mj_resetData(m, d);
 
-    // std::thread control_thread(Control_loop);
+    std::thread control_thread(Control_loop);
     std::thread control_thread(std::bind(Control_loop, arm_sdk_publisher, std::ref(msg)));
     std::thread mujocoRender_thread(MujocoRender_loop);
 
