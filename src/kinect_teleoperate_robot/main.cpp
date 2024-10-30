@@ -53,7 +53,7 @@ bool s_isRunning = true;
 #define Real_Control true    // control real unitree robot in reality
 #define Enable_Torso false    // enable torso rotation angle mapping. Test function, open with caution!
 #define Enable_Hand  false    // enable hand opening and closing status detection. Test function, open with caution!
-#define EchoFrequency true   // Whether to display the running frequency of each thread
+#define EchoFrequency false   // Whether to display the running frequency of each thread
 
 // #define NETWORK_INTERFACE "enp3s0"  // define wangtao network interface
 const std::string NETWORK_INTERFACE = "enp3s0";  // define wangtao network interface
@@ -115,9 +115,36 @@ enum JointIndex {
 
 std::array<float, 8> init_pos{};
 std::array<float, 8> current_jpos_des{};
-std::array<float, 8> target_pos = { 0.f,  kPi_2,  0.f, kPi_2,
-                                0.f, -kPi_2,  0.f, kPi_2 };
+// std::array<float, 8> current_jpos_des{0.f,  kPi_2,  0.f, kPi_2,
+//                                 0.f, -kPi_2,  0.f, kPi_2 };//for reset
 
+// std::array<float, 8> target_pos = { 0.f,  kPi_2,  0.f, kPi_2,
+//                                 0.f, -kPi_2,  0.f, kPi_2 };
+
+std::array<float, 8> target_pos{};
+
+
+std::array<JointIndex, 9> arm_joints = {
+JointIndex::kLeftShoulderPitch,  JointIndex::kLeftShoulderRoll,
+JointIndex::kLeftShoulderYaw,    JointIndex::kLeftElbow,
+JointIndex::kRightShoulderPitch, JointIndex::kRightShoulderRoll,
+JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw};
+
+float weight = 0.f;
+float weight_rate = 0.2f;
+
+float kp = 60.f;
+float kd = 1.5f;
+float dq = 0.f;
+float tau_ff = 0.f;
+
+float control_dt = 0.02f;
+float max_joint_velocity = 0.5f;
+
+float delta_weight = weight_rate * control_dt;
+float max_joint_delta = max_joint_velocity * control_dt;
+auto sleep_time =
+std::chrono::milliseconds(static_cast<int>(control_dt / 0.001f));
 
 void printArray(const std::array<float, 9>& arr) {
     for (const auto& val : arr) {
@@ -125,6 +152,8 @@ void printArray(const std::array<float, 9>& arr) {
     }
     std::cout << std::endl;  
 }
+
+bool is_arm_lifted_up = false;
 
 // For control real robot G1
 #if Control_G1
@@ -541,7 +570,7 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
             d->ctrl[left_elbow_pitch_joint_id] = left_elbow_yaw;
             d->ctrl[right_elbow_pitch_joint_id] = right_elbow_yaw;
 
-            printf("aaaaa\n");
+            // printf("aaaaa\n");
             // lcm.publish("EXAMPLE_CHANNEL", &msg);
 
             #if Enable_Torso
@@ -571,117 +600,99 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
             #endif
             #endif
 
-            std::array<JointIndex, 9> arm_joints = {
-            JointIndex::kLeftShoulderPitch,  JointIndex::kLeftShoulderRoll,
-            JointIndex::kLeftShoulderYaw,    JointIndex::kLeftElbow,
-            JointIndex::kRightShoulderPitch, JointIndex::kRightShoulderRoll,
-            JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw};
-
-            float weight = 0.f;
-            float weight_rate = 0.2f;
-
-            float kp = 60.f;
-            float kd = 1.5f;
-            float dq = 0.f;
-            float tau_ff = 0.f;
-
-            float control_dt = 0.02f;
-            float max_joint_velocity = 0.5f;
-
-            float delta_weight = weight_rate * control_dt;
-            float max_joint_delta = max_joint_velocity * control_dt;
-            auto sleep_time =
-            std::chrono::milliseconds(static_cast<int>(control_dt / 0.001f));
-
-
-
             // Target Pos Set and  envalue;
-            // std::array<float, 9> target_pos = {
-            //                 H1_hardware_signal.left_shoulder_pitch,
-            //                 H1_hardware_signal.left_shoulder_roll,
-            //                 H1_hardware_signal.left_shoulder_yaw,
-            //                 H1_hardware_signal.left_elbow_yaw,
-            //                 H1_hardware_signal.right_shoulder_pitch,
-            //                 H1_hardware_signal.right_shoulder_roll,
-            //                 H1_hardware_signal.right_shoulder_yaw,
-            //                 H1_hardware_signal.right_elbow_yaw , 0.f};  
+            target_pos = {
+                H1_hardware_signal.left_shoulder_pitch,
+                H1_hardware_signal.left_shoulder_roll,
+                H1_hardware_signal.left_shoulder_yaw,
+                H1_hardware_signal.left_elbow_yaw,
+                H1_hardware_signal.right_shoulder_pitch,
+                H1_hardware_signal.right_shoulder_roll,
+                H1_hardware_signal.right_shoulder_yaw,
+                H1_hardware_signal.right_elbow_yaw}; 
 
-            // target_pos = {
-            //     H1_hardware_signal.left_shoulder_pitch,
-            //     H1_hardware_signal.left_shoulder_roll,
-            //     H1_hardware_signal.left_shoulder_yaw,
-            //     H1_hardware_signal.left_elbow_yaw,
-            //     H1_hardware_signal.right_shoulder_pitch,
-            //     H1_hardware_signal.right_shoulder_roll,
-            //     H1_hardware_signal.right_shoulder_yaw,
-            //     H1_hardware_signal.right_elbow_yaw , 0.f};  
-
-
-
-            // increase weight
-            weight += delta_weight;
-            weight = std::clamp(weight, 0.f, 1.f);
-            std::cout << weight << std::endl;
 
             // set weight
-            msg.motor_cmd().at(JointIndex::kNotUsedJoint).q(weight * weight);
+            msg.motor_cmd().at(JointIndex::kNotUsedJoint).q(1);
 
-            // update jpos des
-              // for (int j = 0; j < target_pos.size(); ++j) {
-            // current_jpos_des.at(j) +=
-                // std::clamp(target_pos.at(j) - current_jpos_des.at(j),
-            //                 -max_joint_delta, max_joint_delta);
-                
-
-            // }
-            // std::cout << "***********current pos*********" << std::endl;
-            // std::cout << current_jpos_des.at(1) << std::endl;
-            // std::cout << "***********target_pos pos*********" << std::endl;
-            // std::cout << target_pos.at(1) << std::endl;        
-
-            // for (int j = 0; j < target_pos.size(); ++j) {
-            //     float delta = target_pos.at(j) - current_jpos_des.at(j);
-            //     delta = std::clamp(delta, -max_joint_delta, max_joint_delta);
-            //     current_jpos_des.at(j) += delta;
-            // }        
-            
-            //     std::cout << "Joint 2: " <<  std::endl;
-            //     std::cout << "Current Pos: " << current_jpos_des.at(1)
-            //             << " Target Pos: " << target_pos.at(1) << std::endl;      
-
-            // // set control joints
-            // for (int j = 0; j < init_pos.size(); ++j) {
-            // msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
-            // msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
-            // msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
-            // msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
-            // msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
-            // }
-
-
-
-            // lift arms up
-            // update jpos des
             for (int j = 0; j < init_pos.size(); ++j) {
-            current_jpos_des.at(j) +=
-                std::clamp(target_pos.at(j) - current_jpos_des.at(j),
-                            -max_joint_delta, max_joint_delta);
+                current_jpos_des.at(j) +=
+                    std::clamp(target_pos.at(j) - current_jpos_des.at(j),
+                                -max_joint_delta, max_joint_delta);
 
-            // set control joints
-            for (int j = 0; j < init_pos.size(); ++j) {
-                msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
-                msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
-                msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
-                msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
-                msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+                current_jpos_des.at(j) = std::clamp(current_jpos_des.at(j), -kPi_2, kPi_2);               
+
+                // set control joints
+                for (int j = 0; j < init_pos.size(); ++j) {
+                    msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+                    msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+                    msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+                    msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+                    msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+                }
+
+                std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
+                std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
             }
-
-
-        }
-
-            // send dds msg
+                
             arm_sdk_publisher->Write(msg);
-            // std::this_thread::sleep_for(sleep_time);
+
+
+            std::this_thread::sleep_for(sleep_time);
+
+
+
+            //===============================================================================//
+            // Test for arm control
+            //===============================================================================//
+            // // lift arms up
+            // if (!is_arm_lifted_up)
+            // {
+            //     for (int j = 0; j < init_pos.size(); ++j) {
+            //         current_jpos_des.at(j) +=
+            //             std::clamp(target_pos.at(j) - init_pos.at(j),
+            //                         -max_joint_delta, max_joint_delta);
+
+            //         // set control joints
+            //         for (int j = 0; j < init_pos.size(); ++j) {
+            //             msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+            //             msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+            //             msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+            //             msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+            //             msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+            //         }
+            //     }
+                
+            //     arm_sdk_publisher->Write(msg);
+
+            //     if (target_pos.at(1) - current_jpos_des.at(1) <= 0.0001) {
+            //         is_arm_lifted_up = true;
+            //     }
+            //     std::cout << "***********arm lifting*********" << std::endl;
+
+
+            // }else{
+            //     for (int j = 0; j < init_pos.size(); ++j) {
+            //         current_jpos_des.at(j) +=
+            //             std::clamp(init_pos.at(j) - current_jpos_des.at(j),
+            //                         -max_joint_delta, max_joint_delta);
+
+            //         // set control joints
+            //         for (int j = 0; j < init_pos.size(); ++j) {
+            //             msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+            //             msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+            //             msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+            //             msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+            //             msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+            //         }
+            //     }
+
+            //     arm_sdk_publisher->Write(msg);
+
+            //     std::cout << "***********arm down*********" << std::endl;
+
+            // }
+
 
             #if EchoFrequency
             time_point<high_resolution_clock> ctrl_end = high_resolution_clock::now();
@@ -911,7 +922,7 @@ int main(int argc, char const *argv[])
     d = mj_makeData(m);
     mj_resetData(m, d);
 
-    std::thread control_thread(Control_loop);
+    // std::thread control_thread(Control_loop);
     std::thread control_thread(std::bind(Control_loop, arm_sdk_publisher, std::ref(msg)));
     std::thread mujocoRender_thread(MujocoRender_loop);
 
