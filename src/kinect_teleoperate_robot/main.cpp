@@ -122,6 +122,8 @@ std::array<float, 8> current_jpos_des{};
 //                                 0.f, -kPi_2,  0.f, kPi_2 };
 
 std::array<float, 8> target_pos{};
+/*-------for contain last pos info------------*/
+std::array<float, 8> last_pos{};
 
 
 std::array<JointIndex, 9> arm_joints = {
@@ -133,12 +135,12 @@ JointIndex::kRightShoulderYaw,   JointIndex::kRightElbow, JointIndex::kWaistYaw}
 float weight = 0.f;
 float weight_rate = 0.2f;
 
-float kp = 60.f;
-float kd = 1.5f;
+float kp = 80.f;
+float kd = 2.0f;
 float dq = 0.f;
 float tau_ff = 0.f;
 
-float control_dt = 0.02f;
+float control_dt = 0.01f;
 float max_joint_velocity = 0.5f;
 
 float delta_weight = weight_rate * control_dt;
@@ -329,6 +331,8 @@ void KinectRender_loop(k4a_calibration_t sensorCalibration) {
             double frequency = 1e6 / duration;
             std::cout << "Kinect Render loop: " << frequency << " Hz" << std::endl;
             #endif
+            // std::cout << "position: " << spineChestJoint.position.xyz << ---- << std::endl;
+
         } 
         else {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -581,8 +585,8 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
             #if Real_Control
             #if Control_H1
             H1_hardware_signal.left_shoulder_pitch = static_cast<float>(left_shoulder_yaw);
-            H1_hardware_signal.left_shoulder_roll = static_cast<float>(left_shoulder_roll);
-            H1_hardware_signal.left_shoulder_yaw = static_cast<float>(left_shoulder_pitch);
+            H1_hardware_signal.left_shoulder_roll = static_cast<float>(left_shoulder_pitch);
+            H1_hardware_signal.left_shoulder_yaw = static_cast<float>(left_shoulder_roll);
             H1_hardware_signal.right_shoulder_pitch = static_cast<float>(right_shoulder_yaw);
             H1_hardware_signal.right_shoulder_roll = static_cast<float>(right_shoulder_pitch);
             H1_hardware_signal.right_shoulder_yaw = static_cast<float>(right_shoulder_roll);
@@ -631,16 +635,25 @@ void Control_loop(std::shared_ptr<unitree::robot::ChannelPublisher<unitree_go::m
                     msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
                 }
 
+                // std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
                 std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
-                std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
+                // std::cout << "***********current pos " << 5 << "*********" << current_jpos_des.at(5) <<  std::endl;
             }
                 
             arm_sdk_publisher->Write(msg);
 
 
+
+
             std::this_thread::sleep_for(sleep_time);
+            /*--------------------------*/
 
+                // if()
+                // for (int size_t i = 0; i < current_pos.size(); ++i) {
+                //     last_pos[i] = current_pos[i];
+                // }
 
+            /*-------------------------*/
 
             //===============================================================================//
             // Test for arm control
@@ -887,8 +900,6 @@ void Main_loop(){
 }
 
 
-
-
 int main(int argc, char const *argv[])
 {
 
@@ -930,6 +941,29 @@ int main(int argc, char const *argv[])
 
     control_thread.join();
     mujocoRender_thread.join();
+
+    int sstep = int(5/control_dt);
+    for (int i = 0; i < sstep; ++i) {
+
+        for (int j = 0; j < init_pos.size(); ++j) {
+            current_jpos_des.at(j) +=
+                std::clamp(init_pos.at(j) - current_jpos_des.at(j),
+                            -max_joint_delta, max_joint_delta);
+
+            // set control joints
+            for (int j = 0; j < init_pos.size(); ++j) {
+                msg.motor_cmd().at(arm_joints.at(j)).q(current_jpos_des.at(j));
+                msg.motor_cmd().at(arm_joints.at(j)).dq(dq);
+                msg.motor_cmd().at(arm_joints.at(j)).kp(kp);
+                msg.motor_cmd().at(arm_joints.at(j)).kd(kd);
+                msg.motor_cmd().at(arm_joints.at(j)).tau(tau_ff);
+            }
+            std::cout << "***********current pos " << j << "*********" << current_jpos_des.at(j) <<  std::endl;
+        }
+        arm_sdk_publisher->Write(msg);
+        std::this_thread::sleep_for(sleep_time);
+    }
+    std::cout << "***********arm down*********" << std::endl;
 
     return 0;
 }
